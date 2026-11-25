@@ -1,0 +1,27 @@
+# /etc/systemd/system/trustflow-backend.service
+# Runs the Spring Boot jar as the unprivileged "trustflow" user. Config comes from /etc/trustflow/trustflow.env (mode 600).
+[Unit]
+Description=TrustFlow backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=trustflow
+Group=trustflow
+EnvironmentFile=/etc/trustflow/trustflow.env
+WorkingDirectory=/opt/trustflow
+ExecStart=/usr/bin/java -XX:MaxRAMPercentage=75 -jar /opt/trustflow/app.jar
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/trustflow/backend.log
+StandardError=append:/var/log/trustflow/backend.log
+# Sandboxing
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/trustflow
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+.env
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfplan
+tf.plan
+backend/target/
+frontend/node_modules/
+frontend/dist/
+*.pem
+*.key
+dependency-check-report.*
+trivy-report.json

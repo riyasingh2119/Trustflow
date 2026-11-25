@@ -1,0 +1,47 @@
+# The Jenkins deployer may only update Deployments (and read what it needs to wait for a rollout) in this namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-deployer
+  namespace: trustflow
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployment-updater
+  namespace: trustflow
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-deployer-binding
+  namespace: trustflow
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-deployer
+    namespace: trustflow
+roleRef:
+  kind: Role
+  name: deployment-updater
+  apiGroup: rbac.authorization.k8s.io
+---
+# Long-lived token for the deployer (K8s >= 1.24 no longer creates it automatically).
+# Build a kubeconfig from it and store it in Jenkins as a "Secret file" credential with id "kubeconfig".
+apiVersion: v1
+kind: Secret
+metadata:
+  name: jenkins-deployer-token
+  namespace: trustflow
+  annotations:
+    kubernetes.io/service-account.name: jenkins-deployer
+type: kubernetes.io/service-account-token

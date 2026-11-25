@@ -1,0 +1,51 @@
+server:
+  port: 8080
+  shutdown: graceful
+  error:
+    include-message: always
+    include-stacktrace: never
+spring:
+  application:
+    name: trustflow
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/trustflow}
+    username: ${DB_USER:trustflow}
+    password: ${DB_PASSWORD:trustflow}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
+management:
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+trustflow:
+  jwt:
+    secret: ${JWT_SECRET:change-me-change-me-change-me-change-me-0123456789}
+    expiry-minutes: 15
+  cors:
+    allowed-origin: ${CORS_ORIGIN:http://localhost:5173}
+  alert:
+    url: ${ALERT_URL:}
+    key: ${ALERT_KEY:}
+  mfa:
+    # Simulated TOTP step in seconds
+    step-seconds: 30
+  timezone: ${APP_TZ:Asia/Kolkata}
+  # Demo mode: simulatedHour override and /api/auth/mfa/demo-code. Set DEMO_MODE=false for any real deployment.
+  demo-mode: ${DEMO_MODE:true}
+logging:
+  level:
+    root: INFO
+    com.trustflow: INFO

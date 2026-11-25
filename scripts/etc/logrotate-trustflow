@@ -1,0 +1,10 @@
+/var/log/trustflow/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    create 640 trustflow trustflow
+}

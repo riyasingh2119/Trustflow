@@ -1,0 +1,36 @@
+groups:
+  - name: trustflow
+    rules:
+      - alert: InstanceDown
+        expr: up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Target {{ $labels.instance }} ({{ $labels.job }}) is down"
+
+      - alert: HighCpu
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "CPU above 80 percent on {{ $labels.instance }}"
+
+      - alert: HighDenyRate
+        expr: sum(rate(trustflow_decisions_total{decision="DENY"}[5m])) > 0.5
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Unusual number of denied requests"
+
+      - alert: FailedLoginBurst
+        expr: increase(trustflow_failed_logins_total[5m]) > 10
+        labels: { severity: warning }
+        annotations:
+          summary: "Possible credential attack: more than 10 failed logins in 5 minutes"
+
+      - alert: DiskAlmostFull
+        expr: (1 - node_filesystem_avail_bytes{fstype=~"ext4|xfs",mountpoint="/"} / node_filesystem_size_bytes{fstype=~"ext4|xfs",mountpoint="/"}) * 100 > 85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Root filesystem above 85 percent on {{ $labels.instance }}"

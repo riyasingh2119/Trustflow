@@ -1,0 +1,13 @@
+# Non-sensitive settings only. Risk weights and thresholds live in the risk_config table (editable by the admin).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trustflow-config
+  namespace: trustflow
+data:
+  APP_TZ: "Asia/Kolkata"
+  CORS_ORIGIN: "http://trustflow.local"
+  DEMO_MODE: "true"
+  LOGGING_LEVEL_COM_TRUSTFLOW: "INFO"
+  DB_URL: "jdbc:postgresql://postgres:5432/trustflow"
+  DB_USER: "trustflow"

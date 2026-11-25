@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: TrustFlow high-risk alert pipeline (API Gateway -> Lambda -> SNS email)
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: Address that receives high-risk alerts
+  SharedSecret:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional secret the backend sends in the X-TrustFlow-Key header
+
+Resources:
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: trustflow-alerts
+      DisplayName: TrustFlow alerts
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+      Tags:
+        - Key: project
+          Value: trustflow
+
+  NotifyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: publish-alert
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref AlertTopic
+      Tags:
+        - Key: project
+          Value: trustflow
+
+  NotifyFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: trustflow-notify
+      Runtime: python9.9
+      Handler: index.handler
+      Timeout: 10
+      MemorySize: 256
+      Role: !GetAtt NotifyRole.Arn
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref AlertTopic
+          SHARED_SECRET: !Ref SharedSecret
+      Code:
+        ZipFile: |
+          """TrustFlow high-risk alert handler.
+
+          Invoked by API Gateway (HTTP API, payload format 2.0) when the backend posts a DENY with a high score.
+          Formats a short message, publishes it to SNS (which e-mails the administrator) and logs it to CloudWatch.
+          """
+          import json
+          import os
+
+          import boto3
+
+          sns = boto3.client("sns")
+
+
+          def _response(code, body):
+              return {"statusCode": code, "headers": {"Content-Type": "application/json"}, "body": json.dumps(body)}
+
+
+          def handler(event, context):
+              # Optional shared secret so the endpoint is not open to anyone who finds the URL
+              expected = os.environ.get("SHARED_SECRET", "")
+              if expected:
+                  headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+                  if headers.get("x-trustflow-key") != expected:
+                      print("rejected: missing or wrong shared secret")
+                      return _response(401, {"error": "unauthorized"})
+
+              try:
+                  body = json.loads(event.get("body") or "{}")
+              except json.JSONDecodeError:
+                  return _response(400, {"error": "body must be JSON"})
+
+              user = str(body.get("user", "unknown"))[:64]
+              resource = str(body.get("resource", "unknown"))[:120]
+              score = body.get("score", "?")
+              decision = str(body.get("decision", "?"))[:16]
+              reason = str(body.get("reason", ""))[:300]
+
+              message = "TrustFlow high-risk event: user=%s resource=%s score=%s decision=%s\nReason: %s" % (
+                  user, resource, score, decision, reason)
+              sns.publish(TopicArn=os.environ["TOPIC_ARN"], Subject="TrustFlow alert", Message=message)
+              print(message)  # appears in CloudWatch Logs
+              return _response(200, {"status": "sent"})
+      Tags:
+        - Key: project
+          Value: trustflow
+
+  AlertApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: trustflow-alert-api
+      ProtocolType: HTTP
+      RouteKey: POST /alert
+      Target: !GetAtt NotifyFunction.Arn
+      Tags:
+        project: trustflow
+
+  InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref NotifyFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${AlertApi}/*/*/alert
+
+Outputs:
+  AlertUrl:
+    Description: Set this as ALERT_URL in the backend
+    Value: !Sub ${AlertApi.ApiEndpoint}/alert
+  TopicArn:
+    Value: !Ref AlertTopic

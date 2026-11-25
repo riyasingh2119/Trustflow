@@ -1,0 +1,108 @@
+// TrustFlow CI/CD + DevSecOps pipeline. Triggered by a GitHub webhook (Jenkins "GitHub hook trigger").
+// Credentials (Manage Jenkins > Credentials): dockerhub (username/password), kubeconfig (secret file),
+// Sonar server "sonar" configured under Manage Jenkins > System.
+pipeline {
+  agent any
+
+  triggers { githubPush() }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    BACKEND_IMAGE  = 'riyasingh/trustflow-backend'
+    FRONTEND_IMAGE = 'riyasingh/trustflow-frontend'
+    K8S_NAMESPACE  = 'trustflow'
+  }
+
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Build') {
+      steps { sh 'cd backend && mvn -B clean package -DskipTests' }
+    }
+
+    stage('Unit and BDD tests') {
+      steps { sh 'cd backend && mvn -B test' }
+      post {
+        always {
+          junit 'backend/target/surefire-reports/*.xml'
+          archiveArtifacts artifacts: 'backend/target/cucumber-report.html', allowEmptyArchive: true
+        }
+      }
+    }
+
+    stage('SonarQube') {
+      steps {
+        withSonarQubeEnv('sonar') { sh 'cd backend && mvn -B sonar:sonar' }
+        timeout(time: 5, unit: 'MINUTES') { waitForQualityGate abortPipeline: true }
+      }
+    }
+
+    stage('Dependency Check') {
+      steps { sh 'cd backend && mvn -B org.owasp:dependency-check-maven:check -DfailBuildOnCVSS=7' }
+      post { always { archiveArtifacts artifacts: 'backend/target/dependency-check-report.html', allowEmptyArchive: true } }
+    }
+
+    stage('Docker Build') {
+      steps {
+        sh 'docker build -t $BACKEND_IMAGE:$BUILD_NUMBER backend'
+        sh 'docker build -t $FRONTEND_IMAGE:$BUILD_NUMBER frontend'
+      }
+    }
+
+    stage('Trivy Scan') {
+      steps {
+        // Full report first, then gate on CRITICAL findings
+        sh 'trivy image --format json -o trivy-backend.json $BACKEND_IMAGE:$BUILD_NUMBER'
+        sh 'trivy image --format json -o trivy-frontend.json $FRONTEND_IMAGE:$BUILD_NUMBER'
+        sh 'trivy image --exit-code 1 --severity CRITICAL $BACKEND_IMAGE:$BUILD_NUMBER'
+        sh 'trivy image --exit-code 1 --severity CRITICAL $FRONTEND_IMAGE:$BUILD_NUMBER'
+      }
+      post { always { archiveArtifacts artifacts: 'trivy-*.json', allowEmptyArchive: true } }
+    }
+
+    stage('Push') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')]) {
+          // Single-quoted so the shell, not Groovy, expands the secret and it never reaches the build log
+          sh 'echo $DH_PASS | docker login -u $DH_USER --password-stdin'
+          sh 'docker push $BACKEND_IMAGE:$BUILD_NUMBER'
+          sh 'docker push $FRONTEND_IMAGE:$BUILD_NUMBER'
+        }
+      }
+    }
+
+    stage('Deploy') {
+      steps {
+        withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+          sh 'kubectl set image deployment/trustflow-backend backend=$BACKEND_IMAGE:$BUILD_NUMBER -n $K8S_NAMESPACE'
+          sh 'kubectl set image deployment/trustflow-frontend frontend=$FRONTEND_IMAGE:$BUILD_NUMBER -n $K8S_NAMESPACE'
+          sh 'kubectl rollout status deployment/trustflow-backend -n $K8S_NAMESPACE --timeout=180s'
+          sh 'kubectl rollout status deployment/trustflow-frontend -n $K8S_NAMESPACE --timeout=120s'
+        }
+      }
+      post {
+        failure {
+          // Automatic rollback when the new version does not become ready
+          withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+            sh 'kubectl rollout undo deployment/trustflow-backend -n $K8S_NAMESPACE || true'
+            sh 'kubectl rollout undo deployment/trustflow-frontend -n $K8S_NAMESPACE || true'
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      sh 'docker logout || true'
+      sh 'docker image prune -f || true'
+    }
+  }
+}
