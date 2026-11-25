@@ -7,17 +7,9 @@ who is asking (JWT identity and role), what they ask for (resource, action, sens
 time of access, recent failed logins). Every decision is written to an audit trail with a plain-language reason, and a
 high-risk denial triggers a serverless alert (API Gateway, Lambda, SNS e-mail).
 
-Project of Riya Singh (Reg. no. 12325638, section K4O2311) for CSE493 Linux System Administration and
-INT378 Advancements in Cloud and DevOps. Design reference: *TrustFlow: Complete Project Detail*.
 
-## Quick start (local)
 
-Needs Docker with the Compose plugin.
 
-```bash
-cp .env.example .env          # then edit the passwords and JWT_SECRET
-docker compose up --build
-```
 
 | URL | What |
 |-----|------|
